@@ -1,0 +1,50 @@
+<!doctype html><html lang="pt-BR"><meta charset="utf-8"><style>
+@page{size:A4;margin:16mm}
+body{font-family:Helvetica,Arial,sans-serif;font-size:10pt;line-height:1.4;color:#111}
+h1{font-size:18pt;margin:0 0 6pt}h2{font-size:13pt;margin:14pt 0 4pt;border-bottom:1px solid #999}
+.cover{height:250mm;display:flex;flex-direction:column;justify-content:center;text-align:center;page-break-after:always}
+.cover h1{font-size:24pt}.cover p{font-size:13pt;margin:6pt}
+table{border-collapse:collapse;margin:6pt 0}td,th{border:1px solid #888;padding:3pt 8pt}
+code,pre{font-family:Menlo,monospace;font-size:9pt;background:#f2f2f2}pre{padding:5pt;white-space:pre-wrap}
+.crop{display:flow-root;overflow:hidden;border:1px solid #888;margin:6pt 0}.crop img{width:100%;display:block}
+.pb{page-break-before:always}figcaption{font-size:9pt;color:#444}
+</style>
+<div class="cover"><p>Teste de Software</p><h1>Análise de Eficácia de Testes com Teste de Mutação</h1><br><p><b>Guilherme Henrique Siqueira de Lana</b></p><p>Matrícula: 1446843</p><p>Outubro de 2026</p></div>
+
+<h2>1. Análise Inicial</h2>
+<p>Projeto: biblioteca <code>operacoes-mutante</code> (50 funções matemáticas em <code>src/operacoes.js</code>, 50 testes Jest). Ferramentas: Jest 29 e StrykerJS (<code>@stryker-mutator/core</code> + <code>jest-runner</code>).</p>
+<table><tr><th>Métrica</th><th>Valor inicial</th></tr>
+<tr><td>Cobertura de linhas</td><td>98,64%</td></tr><tr><td>Cobertura de statements</td><td>85,41%</td></tr><tr><td>Cobertura de branches</td><td>58,82%</td></tr>
+<tr><td><b>Mutation score</b></td><td><b>73,71%</b> (154 mortos, 3 timeout, 44 sobreviventes, 12 sem cobertura, de 213 mutantes)</td></tr></table>
+<p><b>Discrepância:</b> quase todas as linhas são executadas (98,64%), mas só 73,71% das alterações introduzidas são detectadas. A cobertura mede <i>o que foi executado</i>, não <i>o que foi verificado</i>. Cada função tem um único teste "caminho feliz", sem casos de borda (<code>a === b</code>, zero, negativos), sem ramos de erro com mensagem e sem arrays desordenados ou de tamanho par; a cobertura de branches (58,82%) já indicava isso.</p>
+<figure><div class="crop" style="height:250px"><img src="ini_full.png" style="margin-top:0"></div><figcaption>Figura 1 – Relatório Stryker inicial: 73,71% de mutation score, 44 sobreviventes (vermelho) e 12 sem cobertura (laranja).</figcaption></figure>
+
+<h2>2. Análise de Mutantes Críticos</h2>
+<figure><div class="crop"><img src="crop_ini.png"></div><figcaption>Figura 2 – Mutantes sobreviventes nas linhas 104–112 (isMaiorQue, isMenorQue, isEqual, medianaArray).</figcaption></figure>
+<p><b>Mutante 1 – <code>isMaiorQue</code> (linha 104), EqualityOperator:</b> <code>a &gt; b</code> → <code>a &gt;= b</code>. O único teste era <code>isMaiorQue(10, 5)</code>, que retorna <code>true</code> nas duas versões. Faltou o caso de fronteira <code>a === b</code>; o mesmo vale para <code>isMenorQue</code> (<code>&lt;</code> → <code>&lt;=</code>).</p>
+<p><b>Mutante 2 – <code>medianaArray</code> (linha 109), MethodExpression:</b> <code>[...numeros].sort((a,b)=&gt;a-b)</code> → <code>[...numeros]</code> (sem ordenar). O teste usava <code>[1,2,3,4,5]</code>, que já está ordenado, então a ordenação nunca fazia diferença. Sobreviveram também as mutações do comparador (<code>a+b</code>, <code>() =&gt; undefined</code>).</p>
+<p><b>Mutante 3 – <code>medianaArray</code> (linhas 111–112), NoCoverage/ConditionalExpression:</b> o ramo de quantidade par de elementos (<code>(sorted[mid-1]+sorted[mid])/2</code>) nunca era executado, e <code>if (false)</code> também sobrevivia. Um bloco inteiro de lógica estava sem teste algum, apesar de 98% de cobertura de linhas.</p>
+
+<h2>3. Solução Implementada</h2>
+<p>Criei <code>test/operacoes.mutantes.test.js</code> (32 testes novos; total 82, todos passando com o código original). Principais casos e por que matam os mutantes:</p>
+<pre>expect(isMaiorQue(5, 5)).toBe(false);   // mata  &gt;  → &gt;=
+expect(isMenorQue(5, 5)).toBe(false);   // mata  &lt;  → &lt;=
+expect(isEqual(7, 8)).toBe(false);      // mata  return a===b → return true
+expect(medianaArray([5, 1, 3])).toBe(3);        // exige ordenação correta
+expect(medianaArray([10, 9, 1, 2, 5])).toBe(5); // comparador a-b (e não a+b)
+expect(medianaArray([4, 1, 3, 2])).toBe(2.5);   // cobre o ramo par
+expect(() =&gt; medianaArray([])).toThrow('possui mediana'); // mata if(false) e a string</pre>
+<p>Os testes são eficazes porque usam entradas em que o resultado do código original e o do mutante <i>diferem</i>: valores de fronteira, arrays desordenados, tamanhos par e ímpar, zero/negativos e asserção do texto das mensagens de erro (que mata mutantes de <code>StringLiteral</code>).</p>
+<p><b>Mutantes equivalentes:</b> após os novos testes restaram 7 mutantes que nenhum teste consegue matar, pois o comportamento é idêntico ao original: (a) <code>fatorial</code> sem o <code>if (n===0||n===1) return 1</code> (4 mutantes) – o laço já retorna 1; (b) <code>produtoArray([])</code> sem o <code>if</code> – o <code>reduce</code> com valor inicial 1 já retorna 1; (c) <code>clamp</code> com <code>valor &lt;= min</code> / <code>valor &gt;= max</code> – quando <code>valor === min</code> (ou max) retornar <code>min</code> ou <code>valor</code> é igual. Esses 7 foram marcados com <code>// Stryker disable next-line all</code> e justificativa no código; sem essa exclusão o score seria 96,71%.</p>
+
+<h2>4. Resultados Finais</h2>
+<table><tr><th>Métrica</th><th>Inicial</th><th>Final</th></tr>
+<tr><td>Testes</td><td>50</td><td>82</td></tr><tr><td>Mutantes mortos (+timeout)</td><td>157</td><td>195</td></tr><tr><td>Sobreviventes</td><td>44</td><td>0</td></tr><tr><td>Sem cobertura</td><td>12</td><td>0</td></tr><tr><td>Ignorados (equivalentes)</td><td>0</td><td>18*</td></tr>
+<tr><td><b>Mutation score</b></td><td>73,71%</td><td><b>100%</b> (96,71% sem excluir equivalentes)</td></tr></table>
+<p style="font-size:9pt">*As 4 linhas marcadas geram 18 mutantes ignorados (7 deles os que sobreviviam mais os demais mutantes dessas linhas que já eram mortos).</p>
+<figure><div class="crop" style="height:250px"><img src="fim_full.png" style="margin-top:0"></div><figcaption>Figura 3 – Relatório Stryker final: 100% de mutation score, nenhum sobrevivente.</figcaption></figure>
+
+<h2>5. Conclusão</h2>
+<p>O experimento mostra que cobertura de código é uma métrica necessária, mas insuficiente: com 98,64% de cobertura de linhas, 26% das mutações passavam despercebidas. O teste de mutação mede a capacidade real da suíte de detectar defeitos, aponta exatamente quais asserções estão fracas (fronteiras, ramos não testados, mensagens de erro) e orienta a escrita de testes melhores. Também ensina a reconhecer mutantes equivalentes, que exigem julgamento humano, e a custo computacional razoável apenas em projetos pequenos como este.</p>
+<p>Repositório (fork): <a href="https://github.com/gguilhermelana/operacoes-mutante">https://github.com/gguilhermelana/operacoes-mutante</a></p>
+</html>
